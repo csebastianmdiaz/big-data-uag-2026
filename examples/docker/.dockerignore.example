@@ -1,0 +1,54 @@
+# Example .dockerignore file
+# Copy this file to your project root and rename to ".dockerignore"
+
+# Dependencies
+node_modules
+__pycache__
+*.pyc
+venv
+.venv
+
+# Version control
+.git
+.gitignore
+
+# Environment files (never include secrets in images)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs
+
+# Docker files (not needed inside container)
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist
+build
+*.tar
+*.tar.gz
+
+# Test files
+coverage
+.coverage
+.pytest_cache
+
+# Documentation
+README.md
+docs
