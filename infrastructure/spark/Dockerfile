@@ -3,20 +3,29 @@
 # Big Data UAG 2026 - AWS Academy Data Engineering
 # =============================================================================
 
-FROM spark:3.5.7-scala2.12-java17-python3-ubuntu
+FROM spark:3.5.0-scala2.12-java17-python3-ubuntu
 
 # Metadata
 LABEL maintainer="Big Data UAG 2026"
-LABEL description="Apache Spark 3.5.7 con soporte para Delta Lake y conectores"
+LABEL description="Apache Spark 3.5.0 con soporte para Delta Lake y conectores"
 
 USER root
 
-# Instalar dependencias del sistema
+# Instalar dependencias del sistema y Python 3.11 (para coincidir con Jupyter)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     procps \
-    && rm -rf /var/lib/apt/lists/*
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3.11-distutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --set python3 /usr/bin/python3.11
 
 # Crear directorios de trabajo
 RUN mkdir -p /data /labs /src && \
@@ -48,3 +57,5 @@ WORKDIR /opt/spark
 ENV SPARK_HOME=/opt/spark
 ENV PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
 ENV SPARK_NO_DAEMONIZE=true
+ENV PYSPARK_PYTHON=python3.11
+ENV PYSPARK_DRIVER_PYTHON=python3.11

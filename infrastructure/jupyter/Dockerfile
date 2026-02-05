@@ -53,9 +53,9 @@ USER jovyan
 
 WORKDIR /home/jovyan
 
-# Configurar variables de entorno para Spark
-ENV PYSPARK_PYTHON=python3
-ENV PYSPARK_DRIVER_PYTHON=python3
+# Configurar variables de entorno para Spark (Python 3.11 para coincidir con workers)
+ENV PYSPARK_PYTHON=python3.11
+ENV PYSPARK_DRIVER_PYTHON=python3.11
 ENV SPARK_HOME=/usr/local/spark
 ENV PATH=$PATH:$SPARK_HOME/bin
 
