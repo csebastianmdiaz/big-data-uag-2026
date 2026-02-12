@@ -1,0 +1,19 @@
+# Example terraform.tfvars for access key authentication
+# Copy this file to terraform.tfvars and customize the values
+# 
+# SECURITY WARNING: Never commit terraform.tfvars with real credentials to version control!
+# Add terraform.tfvars to .gitignore
+
+aws_region            = "us-east-1"
+bucket_name           = "datalake-taxi-villarreal-2017"
+project_name          = "big-data-lab"
+environment           = "dev"
+glue_database_name    = "taxi_database"
+
+# Access keys (set these values or use environment variables)
+# aws_access_key_id     = "YOUR_ACCESS_KEY_ID"
+# aws_secret_access_key = "YOUR_SECRET_ACCESS_KEY"
+
+# Alternative: Set via environment variables:
+# export TF_VAR_aws_access_key_id="YOUR_ACCESS_KEY_ID"
+# export TF_VAR_aws_secret_access_key="YOUR_SECRET_ACCESS_KEY"

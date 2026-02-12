@@ -1,0 +1,11 @@
+# Example terraform.tfvars for SSO profile authentication
+# Copy this file to terraform.tfvars and customize the values
+
+aws_region         = "us-east-1"
+bucket_name        = "datalake-taxi-villarreal-2017"
+project_name       = "big-data-lab"
+environment        = "dev"
+glue_database_name = "taxi_database"
+
+# Note: When using SSO profile, authentication is handled via the AWS profile
+# Make sure you have configured the "inbest" profile in ~/.aws/config

@@ -1,0 +1,41 @@
+# ============================================
+# PROVIDER CONFIGURATION EXAMPLES
+# ============================================
+# Choose ONE of the following provider configurations
+# and copy it to providers.tf (or include it in main.tf)
+# ============================================
+
+# ============================================
+# EXAMPLE 1: Using SSO Profile "inbest"
+# ============================================
+# Uncomment the following block to use SSO profile authentication:
+
+# provider "aws" {
+#   region  = var.aws_region
+#   profile = "inbest"
+# }
+
+# ============================================
+# EXAMPLE 2: Using Standard Access Keys
+# ============================================
+# Uncomment the following block to use access keys:
+# (You can also set these via environment variables or terraform.tfvars)
+
+# provider "aws" {
+#   region     = var.aws_region
+#   access_key = var.aws_access_key_id
+#   secret_key = var.aws_secret_access_key
+# }
+
+# If using access keys, add these variables to variables.tf:
+# variable "aws_access_key_id" {
+#   description = "AWS Access Key ID"
+#   type        = string
+#   sensitive   = true
+# }
+#
+# variable "aws_secret_access_key" {
+#   description = "AWS Secret Access Key"
+#   type        = string
+#   sensitive   = true
+# }

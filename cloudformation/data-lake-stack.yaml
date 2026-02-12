@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Deploy S3 Data Lake with Glue and Athena for Big Data Lab'
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket for the data lake (must be globally unique)
+    Default: datalake-taxi-villarreal-2017
+  
+  ProjectName:
+    Type: String
+    Description: Name of the project (used for resource naming)
+    Default: big-data-lab
+  
+  Environment:
+    Type: String
+    Description: Environment name (dev, staging, prod)
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+  
+  GlueDatabaseName:
+    Type: String
+    Description: Name of the Glue database
+    Default: taxi_database
+
+Resources:
+  # S3 Bucket for Data Lake
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: Data Lake Bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # S3 Bucket for Athena Query Results
+  AthenaResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketName}-athena-results'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: Athena Query Results
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # IAM Role for Lambda (to upload sample data)
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-upload-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3UploadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: !Sub '${DataLakeBucket}/*'
+
+  # Lambda function to generate and upload sample data
+  UploadSampleDataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-upload-sample-data'
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import csv
+          import random
+          import json
+          import urllib.request
+          import urllib.error
+          from datetime import datetime, timedelta
+          from io import StringIO
+          
+          s3 = boto3.client('s3')
+          
+          def send_response(event, context, response_status, response_data):
+              response_body = json.dumps({
+                  'Status': response_status,
+                  'Reason': 'See the details in CloudWatch Log Stream',
+                  'PhysicalResourceId': context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': response_data
+              })
+              
+              response_url = event['ResponseURL']
+              req = urllib.request.Request(
+                  response_url,
+                  data=response_body.encode('utf-8'),
+                  method='PUT',
+                  headers={'Content-Type': '', 'Content-Length': str(len(response_body))}
+              )
+              urllib.request.urlopen(req)
+          
+          def generar_viaje(mes, seed_offset=0):
+              """Genera un registro de viaje aleatorio para un mes dado."""
+              random.seed(42 + seed_offset)
+              vendor = random.choice(['1', '2'])
+              dia = random.randint(1, 28)
+              hora = random.randint(0, 23)
+              minuto = random.randint(0, 59)
+              
+              pickup = datetime(2017, mes, dia, hora, minuto, 0)
+              duracion = random.randint(5, 60)
+              dropoff = pickup + timedelta(minutes=duracion)
+              
+              distance = random.randint(1, 25)
+              fare = round(2.50 + distance * 2.50, 2)
+              tip = round(fare * random.uniform(0, 0.30), 2)
+              paytype = random.choices(['1', '2', '3', '4'], weights=[50, 40, 5, 5])[0]
+              if paytype == '2':
+                  tip = 0.00
+              total = round(fare + tip + 0.50 + 0.30, 2)
+              
+              return [vendor, pickup.strftime('%Y-%m-%d %H:%M:%S'),
+                      dropoff.strftime('%Y-%m-%d %H:%M:%S'),
+                      random.randint(1, 4), distance, '1', 'Y',
+                      str(random.randint(1, 265)), str(random.randint(1, 265)),
+                      paytype, fare, 0.00, 0.50, tip, 0.00, 0.30, total]
+          
+          def generate_csv(months, rows_per_month, filter_paytype=None):
+              """Generate CSV data."""
+              header = ['vendor', 'pickup', 'dropoff', 'count', 'distance',
+                       'ratecode', 'storeflag', 'pulocid', 'dolocid',
+                       'paytype', 'fare', 'extra', 'mta_tax', 'tip',
+                       'tolls', 'surcharge', 'total']
+              
+              output = StringIO()
+              writer = csv.writer(output)
+              writer.writerow(header)
+              
+              row_count = 0
+              for mes in months:
+                  for i in range(rows_per_month):
+                      row = generar_viaje(mes, seed_offset=row_count)
+                      if filter_paytype is None or row[9] == filter_paytype:
+                          writer.writerow(row)
+                      row_count += 1
+              
+              return output.getvalue()
+          
+          def lambda_handler(event, context):
+              try:
+                  request_type = event.get('RequestType')
+                  bucket_name = event.get('ResourceProperties', {}).get('BucketName')
+                  
+                  if request_type in ['Create', 'Update']:
+                      # Generate taxi_full.csv (jan-mar 2017, 200 rows per month)
+                      taxi_full = generate_csv([1, 2, 3], 200)
+                      s3.put_object(
+                          Bucket=bucket_name,
+                          Key='landing/taxis/2017/taxi_full.csv',
+                          Body=taxi_full.encode('utf-8'),
+                          ContentType='text/csv'
+                      )
+                      
+                      # Generate taxi_enero.csv (jan only, 200 rows)
+                      taxi_enero = generate_csv([1], 200)
+                      s3.put_object(
+                          Bucket=bucket_name,
+                          Key='landing/taxis/2017/enero/taxi_enero.csv',
+                          Body=taxi_enero.encode('utf-8'),
+                          ContentType='text/csv'
+                      )
+                      
+                      # Generate taxi_tarjeta.csv (all months, only paytype=1)
+                      taxi_tarjeta = generate_csv([1, 2, 3], 200, filter_paytype='1')
+                      s3.put_object(
+                          Bucket=bucket_name,
+                          Key='landing/taxis/2017/paytype_1/taxi_tarjeta.csv',
+                          Body=taxi_tarjeta.encode('utf-8'),
+                          ContentType='text/csv'
+                      )
+                      
+                      response_data = {'Message': 'Sample data uploaded successfully'}
+                      send_response(event, context, 'SUCCESS', response_data)
+                  elif request_type == 'Delete':
+                      send_response(event, context, 'SUCCESS', {})
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  send_response(event, context, 'FAILED', {'Error': str(e)})
+
+  # Permission for CloudFormation to invoke Lambda
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UploadSampleDataFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudformation.amazonaws.com
+
+  # Invoke Lambda to upload data
+  InvokeUploadFunction:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - UploadSampleDataFunction
+      - DataLakeBucket
+      - LambdaInvokePermission
+    Properties:
+      ServiceToken: !GetAtt UploadSampleDataFunction.Arn
+      BucketName: !Ref DataLakeBucket
+
+  # IAM Role for Glue
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-glue-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataLakeBucket.Arn
+                  - !Sub '${DataLakeBucket.Arn}/*'
+
+  # Glue Database
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseName
+        Description: Database for taxi trip data
+
+  # Glue Crawler
+  GlueCrawler:
+    Type: AWS::Glue::Crawler
+    DependsOn:
+      - InvokeUploadFunction
+    Properties:
+      Name: !Sub '${ProjectName}-taxi-crawler'
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref GlueDatabaseName
+      Targets:
+        S3Targets:
+          - Path: !Sub 's3://${DataLakeBucket}/landing/taxis/'
+      SchemaChangePolicy:
+        DeleteBehavior: LOG
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Tags:
+        Name: Taxi Data Crawler
+        Environment: !Ref Environment
+        Project: !Ref ProjectName
+
+  # Athena Workgroup
+  AthenaWorkgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub '${ProjectName}-analytics'
+      Description: Workgroup for analytics queries
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub 's3://${AthenaResultsBucket}/'
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+      Tags:
+        - Key: Name
+          Value: Analytics Workgroup
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+  DataLakeBucketName:
+    Description: Name of the S3 data lake bucket
+    Value: !Ref DataLakeBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-DataLakeBucket'
+
+  DataLakeBucketArn:
+    Description: ARN of the S3 data lake bucket
+    Value: !GetAtt DataLakeBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataLakeBucketArn'
+
+  GlueDatabaseName:
+    Description: Name of the Glue database
+    Value: !Ref GlueDatabaseName
+    Export:
+      Name: !Sub '${AWS::StackName}-GlueDatabase'
+
+  GlueCrawlerName:
+    Description: Name of the Glue crawler
+    Value: !Ref GlueCrawler
+    Export:
+      Name: !Sub '${AWS::StackName}-GlueCrawler'
+
+  AthenaWorkgroupName:
+    Description: Name of the Athena workgroup
+    Value: !Ref AthenaWorkgroup
+    Export:
+      Name: !Sub '${AWS::StackName}-AthenaWorkgroup'
+
+  AthenaResultsBucket:
+    Description: S3 bucket for Athena query results
+    Value: !Ref AthenaResultsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-AthenaResultsBucket'
+
+  SampleQueries:
+    Description: Sample Athena queries to run
+    Value: !Sub |
+      List tables: SHOW TABLES IN ${GlueDatabaseName};
+      Query data: SELECT * FROM ${GlueDatabaseName}.taxis LIMIT 10;
